@@ -209,12 +209,13 @@ function buildPreviewEmbed(data) {
 }
 
 function createEmbedBuilderModal(type, sessionId, data) {
+  const clampInput = (value, maxLength) => (value ? value.slice(0, maxLength) : '');
   const modal = new ModalBuilder().setCustomId(`embedmodal:${type}:${sessionId}`).setTitle(`Edit ${type}`);
 
   if (type === 'author') {
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('author_name').setLabel('Author').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(data.authorName || '')
+        new TextInputBuilder().setCustomId('author_name').setLabel('Author').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(clampInput(data.authorName, 256))
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('author_url').setLabel('Author URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.authorUrl || '')
@@ -229,10 +230,10 @@ function createEmbedBuilderModal(type, sessionId, data) {
   if (type === 'body') {
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(data.title || '')
+        new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(clampInput(data.title, 256))
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('description').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(4096).setValue(data.description || '')
+        new TextInputBuilder().setCustomId('description').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(4000).setValue(clampInput(data.description, 4000))
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('url').setLabel('URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.url || '')
@@ -257,9 +258,9 @@ function createEmbedBuilderModal(type, sessionId, data) {
   }
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('footer').setLabel('Footer').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(2048).setValue(data.footerText || '')
-    ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('footer').setLabel('Footer').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(2048).setValue(clampInput(data.footerText, 2048))
+      ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('footer_icon_url').setLabel('Footer Icon URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.footerIconUrl || '')
     ),
@@ -706,5 +707,3 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(DISCORD_TOKEN);
-
-
