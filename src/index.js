@@ -72,20 +72,63 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('promote')
-    .setDescription('Announce a roster promotion.')
+    .setDescription('Promote a member and update their server role.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption((opt) => opt.setName('target').setDescription('Member being promoted').setRequired(true))
-    .addStringOption((opt) => opt.setName('old_rank').setDescription('Current/old rank').setRequired(true))
-    .addStringOption((opt) => opt.setName('new_rank').setDescription('New rank').setRequired(true))
-    .addStringOption((opt) => opt.setName('reason').setDescription('Promotion reason').setRequired(true)),
+    .addRoleOption((opt) => opt.setName('old_rank').setDescription('Current/old rank role').setRequired(true))
+    .addRoleOption((opt) => opt.setName('new_rank').setDescription('New rank role').setRequired(true))
+    .addStringOption((opt) => opt.setName('reason').setDescription('Promotion reason').setRequired(true))
+    .addBooleanOption((opt) =>
+      opt
+        .setName('announce')
+        .setDescription('Post promotion embed publicly (default: true)')
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName('demote')
-    .setDescription('Announce a roster demotion.')
+    .setDescription('Demote a member and update their server role.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption((opt) => opt.setName('target').setDescription('Member being demoted').setRequired(true))
-    .addStringOption((opt) => opt.setName('new_rank').setDescription('Rank after demotion').setRequired(true))
+    .addRoleOption((opt) => opt.setName('old_rank').setDescription('Current rank role').setRequired(true))
+    .addRoleOption((opt) => opt.setName('new_rank').setDescription('Rank after demotion').setRequired(true))
     .addStringOption((opt) => opt.setName('reason').setDescription('Demotion reason').setRequired(true))
+    .addBooleanOption((opt) =>
+      opt
+        .setName('announce')
+        .setDescription('Post demotion embed publicly (default: true)')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('promotion')
+    .setDescription('Alias of /promote.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption((opt) => opt.setName('target').setDescription('Member being promoted').setRequired(true))
+    .addRoleOption((opt) => opt.setName('old_rank').setDescription('Current/old rank role').setRequired(true))
+    .addRoleOption((opt) => opt.setName('new_rank').setDescription('New rank role').setRequired(true))
+    .addStringOption((opt) => opt.setName('reason').setDescription('Promotion reason').setRequired(true))
+    .addBooleanOption((opt) =>
+      opt
+        .setName('announce')
+        .setDescription('Post promotion embed publicly (default: true)')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('demotion')
+    .setDescription('Alias of /demote.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption((opt) => opt.setName('target').setDescription('Member being demoted').setRequired(true))
+    .addRoleOption((opt) => opt.setName('old_rank').setDescription('Current rank role').setRequired(true))
+    .addRoleOption((opt) => opt.setName('new_rank').setDescription('Rank after demotion').setRequired(true))
+    .addStringOption((opt) => opt.setName('reason').setDescription('Demotion reason').setRequired(true))
+    .addBooleanOption((opt) =>
+      opt
+        .setName('announce')
+        .setDescription('Post demotion embed publicly (default: true)')
+        .setRequired(false)
+    )
 ].map((c) => c.toJSON());
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
@@ -273,45 +316,101 @@ async function handleEvent(interaction) {
 }
 
 async function handlePromote(interaction) {
-  const target = interaction.options.getUser('target', true);
-  const oldRank = interaction.options.getString('old_rank', true);
-  const newRank = interaction.options.getString('new_rank', true);
+  const target = interaction.options.getMember('target');
+  const oldRank = interaction.options.getRole('old_rank', true);
+  const newRank = interaction.options.getRole('new_rank', true);
   const reason = interaction.options.getString('reason', true);
+  const announce = interaction.options.getBoolean('announce') ?? true;
+
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target.manageable) {
+    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', ephemeral: true });
+  }
+  if (!oldRank.editable || !newRank.editable) {
+    return interaction.reply({
+      content: 'I cannot manage one or both selected rank roles due to role hierarchy/permissions.',
+      ephemeral: true
+    });
+  }
+  if (oldRank.id === newRank.id) {
+    return interaction.reply({ content: 'Old rank and new rank must be different roles.', ephemeral: true });
+  }
+
+  if (!target.roles.cache.has(oldRank.id)) {
+    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, ephemeral: true });
+  }
+
+  await target.roles.remove(oldRank, `Promotion by ${interaction.user.tag}: ${reason}`);
+  await target.roles.add(newRank, `Promotion by ${interaction.user.tag}: ${reason}`);
 
   const embed = new EmbedBuilder()
     .setColor('#3BA55D')
     .setTitle('📈 Staff Promotion')
     .setDescription(`${target} has been promoted in the server hierarchy.`)
     .addFields(
-      { name: 'From', value: oldRank, inline: true },
-      { name: 'To', value: newRank, inline: true },
+      { name: 'From', value: `${oldRank}`, inline: true },
+      { name: 'To', value: `${newRank}`, inline: true },
       { name: 'Approved By', value: `${interaction.user}`, inline: true },
       { name: 'Reason', value: reason }
     )
     .setFooter({ text: 'Congratulations and keep up the great work!' })
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed] });
+  if (announce) {
+    await interaction.reply({ embeds: [embed] });
+    return;
+  }
+
+  await interaction.reply({ content: `${target} promoted: ${oldRank} → ${newRank}.`, ephemeral: true });
 }
 
 async function handleDemote(interaction) {
-  const target = interaction.options.getUser('target', true);
-  const newRank = interaction.options.getString('new_rank', true);
+  const target = interaction.options.getMember('target');
+  const oldRank = interaction.options.getRole('old_rank', true);
+  const newRank = interaction.options.getRole('new_rank', true);
   const reason = interaction.options.getString('reason', true);
+  const announce = interaction.options.getBoolean('announce') ?? true;
+
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target.manageable) {
+    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', ephemeral: true });
+  }
+  if (!oldRank.editable || !newRank.editable) {
+    return interaction.reply({
+      content: 'I cannot manage one or both selected rank roles due to role hierarchy/permissions.',
+      ephemeral: true
+    });
+  }
+  if (oldRank.id === newRank.id) {
+    return interaction.reply({ content: 'Old rank and new rank must be different roles.', ephemeral: true });
+  }
+
+  if (!target.roles.cache.has(oldRank.id)) {
+    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, ephemeral: true });
+  }
+
+  await target.roles.remove(oldRank, `Demotion by ${interaction.user.tag}: ${reason}`);
+  await target.roles.add(newRank, `Demotion by ${interaction.user.tag}: ${reason}`);
 
   const embed = new EmbedBuilder()
     .setColor('#ED4245')
     .setTitle('📉 Staff Demotion')
     .setDescription(`${target} has received a roster adjustment.`)
     .addFields(
-      { name: 'Updated Rank', value: newRank, inline: true },
+      { name: 'From', value: `${oldRank}`, inline: true },
+      { name: 'To', value: `${newRank}`, inline: true },
       { name: 'Issued By', value: `${interaction.user}`, inline: true },
       { name: 'Reason', value: reason }
     )
     .setFooter({ text: 'If needed, contact leadership for next steps.' })
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed] });
+  if (announce) {
+    await interaction.reply({ embeds: [embed] });
+    return;
+  }
+
+  await interaction.reply({ content: `${target} demoted: ${oldRank} → ${newRank}.`, ephemeral: true });
 }
 
 client.once('ready', async () => {
@@ -342,9 +441,11 @@ client.on('interactionCreate', async (interaction) => {
         await handleEvent(interaction);
         break;
       case 'promote':
+      case 'promotion':
         await handlePromote(interaction);
         break;
       case 'demote':
+      case 'demotion':
         await handleDemote(interaction);
         break;
       default:
