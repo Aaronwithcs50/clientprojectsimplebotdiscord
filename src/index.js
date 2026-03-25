@@ -1,14 +1,20 @@
 require('dotenv').config();
 
 const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  ModalBuilder,
   PermissionFlagsBits,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require('discord.js');
 const { bumpCase } = require('./store');
 
@@ -71,6 +77,11 @@ const commands = [
     .addStringOption((opt) => opt.setName('footer').setDescription('Footer note').setRequired(false)),
 
   new SlashCommandBuilder()
+    .setName('embed')
+    .setDescription('Open a live embed builder (private preview).')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
     .setName('promote')
     .setDescription('Announce a roster promotion.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -89,6 +100,109 @@ const commands = [
 ].map((c) => c.toJSON());
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const embedSessions = new Map();
+
+function createEmbedBuilderComponents(sessionId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`embed:author:${sessionId}`).setLabel('Edit Author').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`embed:body:${sessionId}`).setLabel('Edit Body').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`embed:images:${sessionId}`).setLabel('Edit Images').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`embed:footer:${sessionId}`).setLabel('Edit Footer').setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`embed:post:${sessionId}`).setLabel('Post Embed').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`embed:reset:${sessionId}`).setLabel('Reset').setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+function buildPreviewEmbed(data) {
+  const embed = new EmbedBuilder().setColor(data.color || ACCENT_COLOR);
+
+  if (data.title) embed.setTitle(data.title);
+  if (data.url) embed.setURL(data.url);
+  if (data.description) embed.setDescription(data.description);
+  if (data.authorName) {
+    embed.setAuthor({
+      name: data.authorName,
+      ...(data.authorUrl ? { url: data.authorUrl } : {}),
+      ...(data.authorIconUrl ? { iconURL: data.authorIconUrl } : {})
+    });
+  }
+  if (data.imageUrl) embed.setImage(data.imageUrl);
+  if (data.thumbnailUrl) embed.setThumbnail(data.thumbnailUrl);
+  if (data.footerText) {
+    embed.setFooter({
+      text: data.footerText,
+      ...(data.footerIconUrl ? { iconURL: data.footerIconUrl } : {})
+    });
+  }
+  if (data.timestamp) embed.setTimestamp();
+  return embed;
+}
+
+function createEmbedBuilderModal(type, sessionId, data) {
+  const modal = new ModalBuilder().setCustomId(`embedmodal:${type}:${sessionId}`).setTitle(`Edit ${type}`);
+
+  if (type === 'author') {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('author_name').setLabel('Author').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(data.authorName || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('author_url').setLabel('Author URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.authorUrl || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('author_icon_url').setLabel('Author Icon URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.authorIconUrl || '')
+      )
+    );
+    return modal;
+  }
+
+  if (type === 'body') {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('title').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256).setValue(data.title || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('description').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(4096).setValue(data.description || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('url').setLabel('URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.url || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('color').setLabel('Color (hex)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('#5865F2').setValue(data.color || '')
+      )
+    );
+    return modal;
+  }
+
+  if (type === 'images') {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('image_url').setLabel('Image URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.imageUrl || '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('thumbnail_url').setLabel('Thumbnail URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.thumbnailUrl || '')
+      )
+    );
+    return modal;
+  }
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('footer').setLabel('Footer').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(2048).setValue(data.footerText || '')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('footer_icon_url').setLabel('Footer Icon URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(data.footerIconUrl || '')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('timestamp').setLabel('Timestamp (on/off)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('on').setValue(data.timestamp ? 'on' : '')
+    )
+  );
+  return modal;
+}
 
 async function registerSlashCommands() {
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
@@ -314,6 +428,98 @@ async function handleDemote(interaction) {
   await interaction.reply({ embeds: [embed] });
 }
 
+async function handleEmbedCommand(interaction) {
+  const sessionId = `${interaction.user.id}-${Date.now().toString(36)}`;
+  embedSessions.set(sessionId, {
+    userId: interaction.user.id,
+    channelId: interaction.channelId,
+    data: { color: ACCENT_COLOR }
+  });
+
+  await interaction.reply({
+    content: 'Live embed builder (private preview). Update sections below to see changes in real time.',
+    embeds: [buildPreviewEmbed(embedSessions.get(sessionId).data)],
+    components: createEmbedBuilderComponents(sessionId),
+    ephemeral: true
+  });
+}
+
+async function handleEmbedButton(interaction) {
+  const [namespace, action, sessionId] = interaction.customId.split(':');
+  if (namespace !== 'embed') return;
+
+  const session = embedSessions.get(sessionId);
+  if (!session) {
+    await interaction.reply({ content: 'This builder session expired. Run /embed again.', ephemeral: true });
+    return;
+  }
+
+  if (interaction.user.id !== session.userId) {
+    await interaction.reply({ content: 'Only the user who started this builder can use it.', ephemeral: true });
+    return;
+  }
+
+  if (action === 'post') {
+    const finalEmbed = buildPreviewEmbed(session.data);
+    await interaction.channel.send({ embeds: [finalEmbed] });
+    await interaction.reply({ content: 'Embed posted to this channel.', ephemeral: true });
+    return;
+  }
+
+  if (action === 'reset') {
+    session.data = { color: ACCENT_COLOR };
+    await interaction.update({
+      content: 'Live embed builder (private preview). Update sections below to see changes in real time.',
+      embeds: [buildPreviewEmbed(session.data)],
+      components: createEmbedBuilderComponents(sessionId)
+    });
+    return;
+  }
+
+  const modal = createEmbedBuilderModal(action, sessionId, session.data);
+  await interaction.showModal(modal);
+}
+
+async function handleEmbedModal(interaction) {
+  const [namespace, type, sessionId] = interaction.customId.split(':');
+  if (namespace !== 'embedmodal') return;
+
+  const session = embedSessions.get(sessionId);
+  if (!session) {
+    await interaction.reply({ content: 'This builder session expired. Run /embed again.', ephemeral: true });
+    return;
+  }
+  if (interaction.user.id !== session.userId) {
+    await interaction.reply({ content: 'Only the user who started this builder can use it.', ephemeral: true });
+    return;
+  }
+
+  if (type === 'author') {
+    session.data.authorName = interaction.fields.getTextInputValue('author_name').trim();
+    session.data.authorUrl = interaction.fields.getTextInputValue('author_url').trim();
+    session.data.authorIconUrl = interaction.fields.getTextInputValue('author_icon_url').trim();
+  } else if (type === 'body') {
+    session.data.title = interaction.fields.getTextInputValue('title').trim();
+    session.data.description = interaction.fields.getTextInputValue('description').trim();
+    session.data.url = interaction.fields.getTextInputValue('url').trim();
+    session.data.color = interaction.fields.getTextInputValue('color').trim() || ACCENT_COLOR;
+  } else if (type === 'images') {
+    session.data.imageUrl = interaction.fields.getTextInputValue('image_url').trim();
+    session.data.thumbnailUrl = interaction.fields.getTextInputValue('thumbnail_url').trim();
+  } else {
+    session.data.footerText = interaction.fields.getTextInputValue('footer').trim();
+    session.data.footerIconUrl = interaction.fields.getTextInputValue('footer_icon_url').trim();
+    const timestampRaw = interaction.fields.getTextInputValue('timestamp').trim().toLowerCase();
+    session.data.timestamp = ['true', 'yes', 'on', '1', 'now'].includes(timestampRaw);
+  }
+
+  await interaction.update({
+    content: 'Live embed builder (private preview). Update sections below to see changes in real time.',
+    embeds: [buildPreviewEmbed(session.data)],
+    components: createEmbedBuilderComponents(sessionId)
+  });
+}
+
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -325,9 +531,19 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
+    if (interaction.isButton()) {
+      await handleEmbedButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit()) {
+      await handleEmbedModal(interaction);
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
     switch (interaction.commandName) {
       case 'kick':
         await handleKick(interaction);
@@ -340,6 +556,9 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'event':
         await handleEvent(interaction);
+        break;
+      case 'embed':
+        await handleEmbedCommand(interaction);
         break;
       case 'promote':
         await handlePromote(interaction);
