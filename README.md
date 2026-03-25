@@ -76,22 +76,27 @@ A private ephemeral confirmation is sent to the command user.
 
 ## 3) Roster & Hierarchy Commands
 
-### `/promote`
+### `/promote` (also available as `/promotion`)
 - Options:
   - `target` (user)
-  - `old_rank` (string)
-  - `new_rank` (string)
+  - `old_rank` (role)
+  - `new_rank` (role)
   - `reason` (string)
+  - `announce` (optional boolean, default true)
 - Permission lock: `Administrator`
-- Sends a polished public promotion embed.
+- Removes `old_rank` and adds `new_rank` on the selected member.
+- Sends a polished public promotion embed (or private confirmation if `announce` is false).
 
-### `/demote`
+### `/demote` (also available as `/demotion`)
 - Options:
   - `target` (user)
-  - `new_rank` (string)
+  - `old_rank` (role)
+  - `new_rank` (role)
   - `reason` (string)
+  - `announce` (optional boolean, default true)
 - Permission lock: `Administrator`
-- Sends a polished public demotion embed.
+- Removes `old_rank` and adds `new_rank` on the selected member.
+- Sends a polished public demotion embed (or private confirmation if `announce` is false).
 
 ---
 
