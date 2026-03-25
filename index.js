@@ -8,6 +8,7 @@ const {
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   REST,
@@ -22,14 +23,24 @@ const {
   DISCORD_TOKEN,
   CLIENT_ID,
   GUILD_ID,
-  EVENT_LOG_CHANNEL_ID,
-  ACCENT_COLOR = '#D7263D'
+  EVENT_LOG_CHANNEL_ID
 } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID || !EVENT_LOG_CHANNEL_ID) {
   console.error('Missing required environment variables. Check README/.env.example');
   process.exit(1);
 }
+
+const DEFAULT_ACCENT_COLOR = '#D7263D';
+
+function normalizeHexColor(value) {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+  return /^#[\dA-Fa-f]{6}$/.test(normalized) ? normalized : null;
+}
+
+const ACCENT_COLOR = normalizeHexColor(process.env.ACCENT_COLOR) ?? DEFAULT_ACCENT_COLOR;
 
 const commands = [
   new SlashCommandBuilder()
@@ -161,11 +172,23 @@ function createEmbedBuilderComponents(sessionId) {
 }
 
 function buildPreviewEmbed(data) {
-  const embed = new EmbedBuilder().setColor(data.color || ACCENT_COLOR);
+  const color = normalizeHexColor(data.color) ?? ACCENT_COLOR;
+  const embed = new EmbedBuilder().setColor(color);
+  const hasVisibleContent =
+    Boolean(data.title) ||
+    Boolean(data.description) ||
+    Boolean(data.authorName) ||
+    Boolean(data.imageUrl) ||
+    Boolean(data.thumbnailUrl) ||
+    Boolean(data.footerText);
 
   if (data.title) embed.setTitle(data.title);
   if (data.url) embed.setURL(data.url);
-  if (data.description) embed.setDescription(data.description);
+  if (data.description) {
+    embed.setDescription(data.description);
+  } else if (!hasVisibleContent) {
+    embed.setDescription('Use the buttons below to start building this embed.');
+  }
   if (data.authorName) {
     embed.setAuthor({
       name: data.authorName,
@@ -275,10 +298,10 @@ async function handleKick(interaction) {
   const target = interaction.options.getMember('target');
   const reason = interaction.options.getString('reason') || 'No reason provided';
 
-  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', flags: MessageFlags.Ephemeral });
   const blocked = isProtectedTarget(interaction, target);
-  if (blocked) return interaction.reply({ content: blocked, ephemeral: true });
-  if (!target.kickable) return interaction.reply({ content: 'I cannot kick that member (role hierarchy).', ephemeral: true });
+  if (blocked) return interaction.reply({ content: blocked, flags: MessageFlags.Ephemeral });
+  if (!target.kickable) return interaction.reply({ content: 'I cannot kick that member (role hierarchy).', flags: MessageFlags.Ephemeral });
 
   const caseInfo = bumpCase(interaction.guildId, target.id, 'kick', {
     moderatorId: interaction.user.id,
@@ -310,10 +333,10 @@ async function handleBan(interaction) {
   const target = interaction.options.getMember('target');
   const reason = interaction.options.getString('reason') || 'No reason provided';
 
-  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', flags: MessageFlags.Ephemeral });
   const blocked = isProtectedTarget(interaction, target);
-  if (blocked) return interaction.reply({ content: blocked, ephemeral: true });
-  if (!target.bannable) return interaction.reply({ content: 'I cannot ban that member (role hierarchy).', ephemeral: true });
+  if (blocked) return interaction.reply({ content: blocked, flags: MessageFlags.Ephemeral });
+  if (!target.bannable) return interaction.reply({ content: 'I cannot ban that member (role hierarchy).', flags: MessageFlags.Ephemeral });
 
   const caseInfo = bumpCase(interaction.guildId, target.id, 'ban', {
     moderatorId: interaction.user.id,
@@ -344,9 +367,9 @@ async function handleWarn(interaction) {
   const target = interaction.options.getMember('target');
   const reason = interaction.options.getString('reason') || 'No reason provided';
 
-  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', flags: MessageFlags.Ephemeral });
   const blocked = isProtectedTarget(interaction, target);
-  if (blocked) return interaction.reply({ content: blocked, ephemeral: true });
+  if (blocked) return interaction.reply({ content: blocked, flags: MessageFlags.Ephemeral });
 
   const caseInfo = bumpCase(interaction.guildId, target.id, 'warn', {
     moderatorId: interaction.user.id,
@@ -381,7 +404,7 @@ async function handleEvent(interaction) {
   const voiceChannel = interaction.options.getChannel('voice_channel');
   const gameLink = interaction.options.getString('game_link') || 'Not provided';
   const eventNumber = interaction.options.getInteger('event_number');
-  const color = interaction.options.getString('color') || ACCENT_COLOR;
+  const color = normalizeHexColor(interaction.options.getString('color')) ?? ACCENT_COLOR;
   const thumbnailUrl = interaction.options.getString('thumbnail_url');
   const imageUrl = interaction.options.getString('image_url');
   const footer = interaction.options.getString('footer') || 'Event system powered by Discord.js v14';
@@ -426,7 +449,7 @@ async function handleEvent(interaction) {
     await logChannel.send({ embeds: [logEmbed] });
   }
 
-  await interaction.reply({ content: 'Event posted and logged successfully.', ephemeral: true });
+  await interaction.reply({ content: 'Event posted and logged successfully.', flags: MessageFlags.Ephemeral });
 }
 
 async function handlePromote(interaction) {
@@ -436,22 +459,22 @@ async function handlePromote(interaction) {
   const reason = interaction.options.getString('reason', true);
   const announce = interaction.options.getBoolean('announce') ?? true;
 
-  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', flags: MessageFlags.Ephemeral });
   if (!target.manageable) {
-    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', ephemeral: true });
+    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', flags: MessageFlags.Ephemeral });
   }
   if (!oldRank.editable || !newRank.editable) {
     return interaction.reply({
       content: 'I cannot manage one or both selected rank roles due to role hierarchy/permissions.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
   if (oldRank.id === newRank.id) {
-    return interaction.reply({ content: 'Old rank and new rank must be different roles.', ephemeral: true });
+    return interaction.reply({ content: 'Old rank and new rank must be different roles.', flags: MessageFlags.Ephemeral });
   }
 
   if (!target.roles.cache.has(oldRank.id)) {
-    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, ephemeral: true });
+    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, flags: MessageFlags.Ephemeral });
   }
 
   await target.roles.remove(oldRank, `Promotion by ${interaction.user.tag}: ${reason}`);
@@ -475,7 +498,7 @@ async function handlePromote(interaction) {
     return;
   }
 
-  await interaction.reply({ content: `${target} promoted: ${oldRank} → ${newRank}.`, ephemeral: true });
+  await interaction.reply({ content: `${target} promoted: ${oldRank} → ${newRank}.`, flags: MessageFlags.Ephemeral });
 }
 
 async function handleDemote(interaction) {
@@ -485,22 +508,22 @@ async function handleDemote(interaction) {
   const reason = interaction.options.getString('reason', true);
   const announce = interaction.options.getBoolean('announce') ?? true;
 
-  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', ephemeral: true });
+  if (!target) return interaction.reply({ content: 'I could not find that member in this server.', flags: MessageFlags.Ephemeral });
   if (!target.manageable) {
-    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', ephemeral: true });
+    return interaction.reply({ content: 'I cannot update this member’s rank due to role hierarchy.', flags: MessageFlags.Ephemeral });
   }
   if (!oldRank.editable || !newRank.editable) {
     return interaction.reply({
       content: 'I cannot manage one or both selected rank roles due to role hierarchy/permissions.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
   if (oldRank.id === newRank.id) {
-    return interaction.reply({ content: 'Old rank and new rank must be different roles.', ephemeral: true });
+    return interaction.reply({ content: 'Old rank and new rank must be different roles.', flags: MessageFlags.Ephemeral });
   }
 
   if (!target.roles.cache.has(oldRank.id)) {
-    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, ephemeral: true });
+    return interaction.reply({ content: `${target} does not currently have ${oldRank}.`, flags: MessageFlags.Ephemeral });
   }
 
   await target.roles.remove(oldRank, `Demotion by ${interaction.user.tag}: ${reason}`);
@@ -524,7 +547,7 @@ async function handleDemote(interaction) {
     return;
   }
 
-  await interaction.reply({ content: `${target} demoted: ${oldRank} → ${newRank}.`, ephemeral: true });
+  await interaction.reply({ content: `${target} demoted: ${oldRank} → ${newRank}.`, flags: MessageFlags.Ephemeral });
 }
 
 async function handleEmbedCommand(interaction) {
@@ -539,7 +562,7 @@ async function handleEmbedCommand(interaction) {
     content: 'Live embed builder (private preview). Update sections below to see changes in real time.',
     embeds: [buildPreviewEmbed(embedSessions.get(sessionId).data)],
     components: createEmbedBuilderComponents(sessionId),
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -549,19 +572,19 @@ async function handleEmbedButton(interaction) {
 
   const session = embedSessions.get(sessionId);
   if (!session) {
-    await interaction.reply({ content: 'This builder session expired. Run /embed again.', ephemeral: true });
+    await interaction.reply({ content: 'This builder session expired. Run /embed again.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (interaction.user.id !== session.userId) {
-    await interaction.reply({ content: 'Only the user who started this builder can use it.', ephemeral: true });
+    await interaction.reply({ content: 'Only the user who started this builder can use it.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (action === 'post') {
     const finalEmbed = buildPreviewEmbed(session.data);
     await interaction.channel.send({ embeds: [finalEmbed] });
-    await interaction.reply({ content: 'Embed posted to this channel.', ephemeral: true });
+    await interaction.reply({ content: 'Embed posted to this channel.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -585,11 +608,11 @@ async function handleEmbedModal(interaction) {
 
   const session = embedSessions.get(sessionId);
   if (!session) {
-    await interaction.reply({ content: 'This builder session expired. Run /embed again.', ephemeral: true });
+    await interaction.reply({ content: 'This builder session expired. Run /embed again.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (interaction.user.id !== session.userId) {
-    await interaction.reply({ content: 'Only the user who started this builder can use it.', ephemeral: true });
+    await interaction.reply({ content: 'Only the user who started this builder can use it.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -619,7 +642,7 @@ async function handleEmbedModal(interaction) {
   });
 }
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   try {
@@ -668,12 +691,12 @@ client.on('interactionCreate', async (interaction) => {
         await handleDemote(interaction);
         break;
       default:
-        await interaction.reply({ content: 'Unknown command.', ephemeral: true });
+        await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
     }
   } catch (error) {
     console.error(`Command error for /${interaction.commandName}:`, error);
 
-    const errReply = { content: 'An error occurred while executing this command.', ephemeral: true };
+    const errReply = { content: 'An error occurred while executing this command.', flags: MessageFlags.Ephemeral };
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp(errReply).catch(() => {});
     } else {
@@ -683,3 +706,5 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(DISCORD_TOKEN);
+
+
